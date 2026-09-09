@@ -51,8 +51,8 @@
     <h2>ATK Cloud Login</h2>
     <p>Phone နဲ့ Computer နှစ်ခုလုံးမှာ Account တစ်ခုတည်းသုံးပါ။</p>
     <div class="field"><label>Email</label><input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com"></div>
-    <div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="6 characters or more"></div>
-    <div class="auth-actions"><button class="btn" onclick="login()">Login</button><button class="btn secondary" onclick="signup()">Create Account</button></div>
+    <div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="new-password" placeholder="6 characters or more"></div>
+    <div class="auth-actions"><button id="loginBtn" class="btn" onclick="login()">Login</button><button id="signupBtn" class="btn secondary" onclick="signup()">Create Account</button></div>
     <div id="authStatus" class="auth-status">Supabase Cloud ကိုချိတ်ဆက်နေပါတယ်…</div>
   </div>
 </div>
@@ -253,10 +253,80 @@ function saveSettings(){settings={bizName:document.getElementById('bizName').val
 function applySettings(){document.getElementById('bizTitle').innerHTML=(settings.bizName||'ATK Lot Sales')+' <span class="cloud-pill">Cloud Sync</span>'}
 async function clearAll(){if(!confirm('Cloud စာရင်းအားလုံးကို အပြီးဖျက်မလား? Backup ရှိတာသေချာပါစေ။'))return;for(const t of ['collections','sales','stock_movements']){const {error}=await sb.from(t).delete().eq('user_id',currentUser.id);if(error){alert('Delete error: '+error.message);return}}await loadCloud()}
 
-async function login(){const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;setAuthStatus('Login ဝင်နေပါတယ်…');const {error}=await sb.auth.signInWithPassword({email,password});if(error)setAuthStatus(error.message,true)}
-async function signup(){const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;if(password.length<6){setAuthStatus('Password အနည်းဆုံး 6 လုံး ထည့်ပါ',true);return}setAuthStatus('Account ဖန်တီးနေပါတယ်…');const {data,error}=await sb.auth.signUp({email,password});if(error){setAuthStatus(error.message,true);return}if(!data.session)setAuthStatus('Account ဖန်တီးပြီးပါပြီ။ Email confirmation လိုနိုင်ပါတယ်။ Mail ကိုစစ်ပါ။');else setAuthStatus('Account ready')}
-async function logout(){await sb.auth.signOut()}
-function setAuthStatus(msg,bad=false){const e=document.getElementById('authStatus');e.textContent=msg;e.style.color=bad?'#b42318':'#6b7280'}
+function setAuthBusy(busy){
+  const loginBtn=document.getElementById('loginBtn'), signupBtn=document.getElementById('signupBtn');
+  if(loginBtn) loginBtn.disabled=busy;
+  if(signupBtn) signupBtn.disabled=busy;
+  if(loginBtn) loginBtn.style.opacity=busy?'.6':'1';
+  if(signupBtn) signupBtn.style.opacity=busy?'.6':'1';
+}
+function validEmail(email){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)}
+function withTimeout(promise,ms=15000){
+  let timer;
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('TIMEOUT')),ms)});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
+function authErrorText(err){
+  const msg=String(err?.message||err||'Unknown error');
+  if(msg==='TIMEOUT') return 'Supabase ကို 15 စက္ကန့်အတွင်း မချိတ်နိုင်ပါ။ Internet / VPN ကိုစစ်ပြီး Reload လုပ်ကာ ပြန်စမ်းပါ။';
+  if(/invalid.*email|email.*invalid/i.test(msg)) return 'Email address အပြည့်အစုံ မှန်မှန်ထည့်ပါ။ ဥပမာ name@gmail.com';
+  if(/already.*registered|user.*already/i.test(msg)) return 'ဒီ Email နဲ့ Account ရှိပြီးသားဖြစ်နိုင်ပါတယ်။ Create Account မလုပ်ဘဲ Login ကိုနှိပ်ပါ။';
+  if(/rate limit|too many/i.test(msg)) return 'Create Account ကိုအကြိမ်များသွားပါတယ်။ ခဏစောင့်ပြီး ပြန်စမ်းပါ။';
+  if(/network|fetch|failed to fetch/i.test(msg)) return 'Network ချိတ်ဆက်မှု မရပါ။ Internet / VPN ကိုစစ်ပြီး Reload လုပ်ပါ။';
+  return msg;
+}
+async function login(){
+  const email=document.getElementById('authEmail').value.trim();
+  const password=document.getElementById('authPassword').value;
+  if(!validEmail(email)){setAuthStatus('Email address အပြည့်အစုံ ထည့်ပါ။ ဥပမာ name@gmail.com',true);return}
+  if(password.length<6){setAuthStatus('Password အနည်းဆုံး 6 လုံး ထည့်ပါ',true);return}
+  setAuthBusy(true); setAuthStatus('Login ဝင်နေပါတယ်…');
+  try{
+    const {data,error}=await withTimeout(sb.auth.signInWithPassword({email,password}));
+    if(error) throw error;
+    if(!data?.session) throw new Error('Login session မရသေးပါ');
+    setAuthStatus('Login အောင်မြင်ပါပြီ။');
+  }catch(err){
+    setAuthStatus(authErrorText(err),true);
+  }finally{
+    setAuthBusy(false);
+  }
+}
+async function signup(){
+  const email=document.getElementById('authEmail').value.trim();
+  const password=document.getElementById('authPassword').value;
+  if(!validEmail(email)){setAuthStatus('Email address အပြည့်အစုံ ထည့်ပါ။ ဥပမာ name@gmail.com',true);return}
+  if(password.length<6){setAuthStatus('Password အနည်းဆုံး 6 လုံး ထည့်ပါ',true);return}
+  setAuthBusy(true); setAuthStatus('Account ဖန်တီးနေပါတယ်…');
+  try{
+    const redirectTo=window.location.origin+window.location.pathname;
+    const {data,error}=await withTimeout(sb.auth.signUp({
+      email,
+      password,
+      options:{emailRedirectTo:redirectTo}
+    }));
+    if(error) throw error;
+    if(data?.session){
+      setAuthStatus('Account ဖန်တီးပြီး Login ဝင်ပြီးပါပြီ။');
+    }else if(data?.user){
+      setAuthStatus('Account ဖန်တီးပြီးပါပြီ။ Email confirmation mail ကိုစစ်ပြီး Confirm လုပ်ပါ။');
+    }else{
+      throw new Error('Account create response မပြည့်စုံပါ။ ပြန်စမ်းပါ။');
+    }
+  }catch(err){
+    setAuthStatus(authErrorText(err),true);
+  }finally{
+    setAuthBusy(false);
+  }
+}
+async function logout(){
+  try{await withTimeout(sb.auth.signOut(),10000)}catch{}
+}
+function setAuthStatus(msg,bad=false){
+  const e=document.getElementById('authStatus');
+  e.textContent=msg;
+  e.style.color=bad?'#b42318':'#6b7280';
+}
 async function handleSession(session){currentUser=session?.user||null;document.getElementById('authScreen').classList.toggle('hidden',!!currentUser);if(currentUser){setAuthStatus('Connected');await loadCloud();go('home')}else{entries=[];renderHome()}}
 sb.auth.onAuthStateChange((_event,session)=>setTimeout(()=>handleSession(session),0));
 
@@ -283,7 +353,7 @@ async function startCloud(){
     if(!window.supabase){
       throw new Error('Supabase library မဖွင့်နိုင်ပါ');
     }
-    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('Connection timeout')),8000));
+    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('Connection timeout')),15000));
     const result=await Promise.race([sb.auth.getSession(),timeout]);
     await handleSession(result.data?.session||null);
     if(!result.data?.session){
