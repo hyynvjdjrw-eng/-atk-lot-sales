@@ -37,10 +37,27 @@
     .footerbar button{flex:1;border:0;border-radius:12px;padding:12px;background:var(--navy);color:#fff;font-weight:800}
     @media(min-width:700px){.grid{grid-template-columns:repeat(6,1fr)} nav{top:63px}.footerbar{display:none}main{padding-bottom:30px}}
     @media print{header,nav,.footerbar,.no-print{display:none!important}main{padding:0}.card{box-shadow:none;border:0}.scroll{overflow:visible;border:0}table{font-size:11px}}
+
+    .auth-screen{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+    .auth-card{width:min(430px,100%);background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.12)}
+    .auth-card h2{margin:0 0 6px;color:var(--navy)} .auth-card p{margin:0 0 16px;color:var(--muted);font-size:13px}
+    .auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.auth-status{font-size:12px;margin-top:10px;color:var(--muted)}
+    .cloud-pill{display:inline-block;margin-left:8px;padding:3px 8px;border-radius:999px;background:#dcfae6;color:var(--ok);font-size:11px;font-weight:800}
   </style>
 </head>
 <body>
-<header><h1 id="bizTitle">ATK Lot Sales</h1><small>ပွဲတိုက်ထုတ် • အရောင်း • လက်ကျန် • ငွေရ/ကျန်</small></header>
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <h2>ATK Cloud Login</h2>
+    <p>Phone နဲ့ Computer နှစ်ခုလုံးမှာ Account တစ်ခုတည်းသုံးပါ။</p>
+    <div class="field"><label>Email</label><input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com"></div>
+    <div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="6 characters or more"></div>
+    <div class="auth-actions"><button class="btn" onclick="login()">Login</button><button class="btn secondary" onclick="signup()">Create Account</button></div>
+    <div id="authStatus" class="auth-status">Supabase Cloud ကိုချိတ်ဆက်နေပါတယ်…</div>
+  </div>
+</div>
+
+<header><h1 id="bizTitle">ATK Lot Sales <span class="cloud-pill">Cloud Sync</span></h1><small>ပွဲတိုက်ထုတ် • အရောင်း • လက်ကျန် • ငွေရ/ကျန်</small></header>
 <nav id="tabs"></nav>
 <main>
   <section id="home" class="view">
@@ -131,7 +148,10 @@
       <div class="field"><label>Business Name</label><input id="bizName"></div>
       <div class="field"><label>Currency</label><input value="MMK" id="currency"></div>
       <button class="btn" onclick="saveSettings()">Save Settings</button>
-      <div class="dangerbox" style="margin-top:14px">ဒီ version က data ကို iPhone browser storage ထဲသိမ်းပါတယ်။ Cloud backup မဟုတ်သေးပါ။ Backup JSON ကိုအခါအားလျော်စွာ export လုပ်ထားပါ။</div>
+       <button class="btn secondary" style="margin-top:8px" onclick="syncNow()">Sync Now</button>
+       <button class="btn secondary" style="margin-top:8px" onclick="importLocalBackup()">Import Old Local Data</button>
+       <button class="btn danger" style="margin-top:8px" onclick="logout()">Logout</button>
+      <div class="dangerbox" style="margin-top:14px">ဒီ version က Supabase Cloud နဲ့ sync လုပ်ပါတယ်။ Local browser storage ကို backup cache အဖြစ်သာသုံးပါတယ်။</div>
       <button class="btn danger" onclick="clearAll()">Delete All Data</button>
     </div>
   </section>
@@ -140,131 +160,149 @@
 <div class="footerbar"><button onclick="go('home')">Home</button><button onclick="go('entry')">+ Entry</button><button onclick="go('summary')">Summary</button></div>
 
 <script>
+window.addEventListener('error', function(e){
+  const box=document.getElementById('authStatus');
+  if(box && (String(e.message||'').includes('supabase') || String(e.filename||'').includes('supabase'))){
+    box.textContent='Supabase library မဖွင့်နိုင်သေးပါ။ Internet ပြန်စစ်ပြီး Reload လုပ်ပါ။';
+    box.style.color='#b42318';
+  }
+});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+        onerror="this.onerror=null;this.src='https://unpkg.com/@supabase/supabase-js@2'"></script>
+<script>
+const SUPABASE_URL='https://njlvqfmrctadthqqlxzl.supabase.co';
+const SUPABASE_KEY='sb_publishable_DYAK4JJ5T6ClJ1SH1zH9dQ_LVjC6D4_';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const LS_KEY='atk_lot_sales_v1', SET_KEY='atk_lot_sales_settings_v1';
 let entries=JSON.parse(localStorage.getItem(LS_KEY)||'[]');
 let settings=JSON.parse(localStorage.getItem(SET_KEY)||'{"bizName":"ATK Lot Sales","currency":"MMK"}');
+let currentUser=null;
 
 const tabDefs=[['home','Home'],['entry','Entry'],['summary','Lot Summary'],['history','History'],['reports','Reports'],['settings','Settings']];
 const tabs=document.getElementById('tabs');
 tabDefs.forEach(([id,label])=>{let b=document.createElement('button');b.textContent=label;b.onclick=()=>go(id);b.dataset.id=id;tabs.appendChild(b)});
 function go(id){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.id===id));if(id==='home')renderHome();if(id==='summary')renderSummary();if(id==='history')renderHistory();if(id==='reports')renderReports();if(id==='settings')loadSettings();window.scrollTo(0,0)}
-
-function save(){localStorage.setItem(LS_KEY,JSON.stringify(entries))}
+function saveCache(){localStorage.setItem(LS_KEY,JSON.stringify(entries))}
 function money(n){return (Number(n)||0).toLocaleString()+' '+(settings.currency||'MMK')}
 function today(){return new Date().toISOString().slice(0,10)}
 document.getElementById('date').value=today();
-
 ['qty','unitPrice'].forEach(id=>document.getElementById(id).addEventListener('input',calcTotal));
 function calcTotal(){let q=+document.getElementById('qty').value||0,p=+document.getElementById('unitPrice').value||0;document.getElementById('totalAmount').value=(q*p).toLocaleString()}
 document.getElementById('type').addEventListener('change',toggleFields);
-function toggleFields(){
-  const t=document.getElementById('type').value;
-  document.getElementById('qtyFields').classList.toggle('hidden',t==='collection');
-  document.getElementById('saleFields').classList.toggle('hidden',t!=='sale');
-  document.getElementById('collectionFields').classList.toggle('hidden',t!=='collection');
-}
+function toggleFields(){const t=document.getElementById('type').value;document.getElementById('qtyFields').classList.toggle('hidden',t==='collection');document.getElementById('saleFields').classList.toggle('hidden',t!=='sale');document.getElementById('collectionFields').classList.toggle('hidden',t!=='collection')}
 toggleFields();
 
-function summarize(){
-  const map={};
-  const sorted=[...entries].sort((a,b)=>(a.date+a.createdAt).localeCompare(b.date+b.createdAt));
-  sorted.forEach(e=>{
-    const lot=(e.lot||'').trim(); if(!lot)return;
-    if(!map[lot])map[lot]={lot,stock:0,sold:0,sales:0,collected:0};
-    let m=map[lot];
-    if(e.type==='stockout')m.stock+=+e.qty||0;
-    if(e.type==='sale'){m.sold+=+e.qty||0;m.sales+=+e.amount||0;m.collected+=+e.collected||0}
-    if(e.type==='collection')m.collected+=+e.collectionAmount||0;
-  });
-  return Object.values(map).map(m=>({...m,remaining:m.stock-m.sold,outstanding:m.sales-m.collected}));
+function packMeta(obj){return 'ATKJSON:'+JSON.stringify(obj)}
+function unpackMeta(note){if(!note||!note.startsWith('ATKJSON:'))return {note:note||''};try{return JSON.parse(note.slice(8))}catch{return {note:note||''}}}
+async function loadCloud(){
+  if(!currentUser)return;
+  const [sm,sa,co]=await Promise.all([
+    sb.from('stock_movements').select('*').eq('movement_type','ISSUE').order('created_at'),
+    sb.from('sales').select('*').order('created_at'),
+    sb.from('collections').select('*').order('created_at')
+  ]);
+  const err=sm.error||sa.error||co.error;if(err){alert('Cloud load error: '+err.message);return}
+  const cloud=[];
+  for(const r of sm.data||[]) cloud.push({id:'stock:'+r.id,date:r.movement_date,type:'stockout',lot:r.lot_no,qty:r.qty,note:r.note||'',createdAt:r.created_at});
+  for(const r of sa.data||[]){const m=unpackMeta(r.note);cloud.push({id:'sale:'+r.id,date:r.sale_date,type:'sale',lot:r.lot_no,qty:r.qty,unitPrice:+(m.unitPrice||((+r.price||0)/(+r.qty||1))),amount:+r.price||0,buyer:m.buyer||'',status:m.status||'Paid',collected:+m.collected||0,note:m.note||'',createdAt:r.created_at})}
+  for(const r of co.data||[]){const m=unpackMeta(r.note);cloud.push({id:'collection:'+r.id,date:r.collection_date,type:'collection',lot:m.lot||'',collectionAmount:+r.amount||0,buyer:m.buyer||'',note:m.note||'',createdAt:r.created_at})}
+  entries=cloud.filter(e=>e.lot);saveCache();renderHome();
 }
-function lotState(lot,excludeId=''){
-  const s=summarize().find(x=>x.lot===lot); if(!s)return {stock:0,sold:0,remaining:0,sales:0,collected:0,outstanding:0};
-  if(!excludeId)return s;
-  // recompute without edited row
-  const keep=entries.filter(x=>x.id!==excludeId), old=entries; entries=keep; const r=summarize().find(x=>x.lot===lot)||{stock:0,sold:0,remaining:0,sales:0,collected:0,outstanding:0}; entries=old; return r;
-}
+async function syncNow(){await loadCloud();alert('Cloud sync complete')}
 
-function saveEntry(){
-  const id=document.getElementById('editId').value;
-  const type=document.getElementById('type').value;
-  const date=document.getElementById('date').value||today();
-  const lot=document.getElementById('lot').value.trim();
-  if(!lot){alert('Lot No. ထည့်ပါ');return}
-  const base={id:id||crypto.randomUUID(),date,type,lot,note:document.getElementById('note').value.trim(),createdAt:id?(entries.find(e=>e.id===id)?.createdAt||new Date().toISOString()):new Date().toISOString()};
-  let row={...base};
+function summarize(){const map={};const sorted=[...entries].sort((a,b)=>(a.date+a.createdAt).localeCompare(b.date+b.createdAt));sorted.forEach(e=>{const lot=(e.lot||'').trim();if(!lot)return;if(!map[lot])map[lot]={lot,stock:0,sold:0,sales:0,collected:0};let m=map[lot];if(e.type==='stockout')m.stock+=+e.qty||0;if(e.type==='sale'){m.sold+=+e.qty||0;m.sales+=+e.amount||0;m.collected+=+e.collected||0}if(e.type==='collection')m.collected+=+e.collectionAmount||0});return Object.values(map).map(m=>({...m,remaining:m.stock-m.sold,outstanding:m.sales-m.collected}))}
+function lotState(lot,excludeId=''){const old=entries;if(excludeId)entries=entries.filter(x=>x.id!==excludeId);const s=summarize().find(x=>x.lot===lot)||{stock:0,sold:0,remaining:0,sales:0,collected:0,outstanding:0};entries=old;return s}
+
+async function saveEntry(){
+  if(!currentUser){alert('Login လိုပါတယ်');return}
+  const id=document.getElementById('editId').value,type=document.getElementById('type').value,date=document.getElementById('date').value||today(),lot=document.getElementById('lot').value.trim(),note=document.getElementById('note').value.trim();if(!lot){alert('Lot No. ထည့်ပါ');return}
+  let error=null;
   if(type==='stockout'){
-    row.qty=+document.getElementById('qty').value||0;if(row.qty<=0){alert('Quantity ထည့်ပါ');return}
+    const qty=+document.getElementById('qty').value||0;if(qty<=0){alert('Quantity ထည့်ပါ');return}
+    const payload={user_id:currentUser.id,movement_date:date,movement_type:'ISSUE',lot_no:lot,qty,note};
+    if(id.startsWith('stock:'))({error}=await sb.from('stock_movements').update(payload).eq('id',id.split(':')[1]));else ({error}=await sb.from('stock_movements').insert(payload));
   }else if(type==='sale'){
-    row.qty=+document.getElementById('qty').value||0;row.unitPrice=+document.getElementById('unitPrice').value||0;row.amount=row.qty*row.unitPrice;
-    row.buyer=document.getElementById('buyer').value.trim();row.status=document.getElementById('status').value;row.collected=+document.getElementById('collected').value||0;
-    if(row.qty<=0){alert('Quantity ထည့်ပါ');return}
-    const state=lotState(lot,id);
-    if(row.qty>state.remaining){alert(`လက်ကျန် ${state.remaining} ခုသာရှိပါတယ်။ ${row.qty} ခု မရောင်းနိုင်ပါ။`);return}
-    if(row.collected>row.amount){alert('Amount Collected က Total Amount ထက်မကျော်ရပါ');return}
-    if(row.status==='Paid')row.collected=row.amount;
-    if(row.status==='Outstanding')row.collected=0;
+    const qty=+document.getElementById('qty').value||0,unitPrice=+document.getElementById('unitPrice').value||0,amount=qty*unitPrice,buyer=document.getElementById('buyer').value.trim(),status=document.getElementById('status').value;let collected=+document.getElementById('collected').value||0;
+    if(qty<=0){alert('Quantity ထည့်ပါ');return}const state=lotState(lot,id);if(qty>state.remaining){alert(`လက်ကျန် ${state.remaining} ခုသာရှိပါတယ်။ ${qty} ခု မရောင်းနိုင်ပါ။`);return}if(collected>amount){alert('Amount Collected က Total Amount ထက်မကျော်ရပါ');return}if(status==='Paid')collected=amount;if(status==='Outstanding')collected=0;
+    const payload={user_id:currentUser.id,sale_date:date,lot_no:lot,price:amount,qty,commission_percent:0,note:packMeta({note,buyer,status,collected,unitPrice})};
+    if(id.startsWith('sale:'))({error}=await sb.from('sales').update(payload).eq('id',id.split(':')[1]));else ({error}=await sb.from('sales').insert(payload));
   }else{
-    row.collectionAmount=+document.getElementById('collectionAmount').value||0;row.buyer=document.getElementById('collectionBuyer').value.trim();
-    if(row.collectionAmount<=0){alert('Collection Amount ထည့်ပါ');return}
-    const state=lotState(lot,id);
-    if(row.collectionAmount>state.outstanding){alert(`ဒီ Lot ရဲ့ လက်ရှိ Outstanding က ${money(state.outstanding)} ပဲရှိပါတယ်။`);return}
+    const collectionAmount=+document.getElementById('collectionAmount').value||0,buyer=document.getElementById('collectionBuyer').value.trim();if(collectionAmount<=0){alert('Collection Amount ထည့်ပါ');return}const state=lotState(lot,id);if(collectionAmount>state.outstanding){alert(`ဒီ Lot ရဲ့ လက်ရှိ Outstanding က ${money(state.outstanding)} ပဲရှိပါတယ်။`);return}
+    const payload={user_id:currentUser.id,collection_date:date,amount:collectionAmount,note:packMeta({lot,buyer,note})};
+    if(id.startsWith('collection:'))({error}=await sb.from('collections').update(payload).eq('id',id.split(':')[1]));else ({error}=await sb.from('collections').insert(payload));
   }
-  if(id){entries=entries.map(e=>e.id===id?row:e)}else entries.push(row);
-  save();resetForm();go('home');
+  if(error){alert('Save error: '+error.message);return}await loadCloud();resetForm();go('home');
 }
 
-function resetForm(){
-  ['editId','lot','qty','unitPrice','totalAmount','buyer','collected','collectionAmount','collectionBuyer','note'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('date').value=today();document.getElementById('type').value='stockout';document.getElementById('status').value='Paid';
-  document.getElementById('cancelEdit').classList.add('hidden');toggleFields();
-}
+function resetForm(){['editId','lot','qty','unitPrice','totalAmount','buyer','collected','collectionAmount','collectionBuyer','note'].forEach(id=>document.getElementById(id).value='');document.getElementById('date').value=today();document.getElementById('type').value='stockout';document.getElementById('status').value='Paid';document.getElementById('cancelEdit').classList.add('hidden');toggleFields()}
 function typeLabel(t){return t==='stockout'?'ပွဲတိုက်ထုတ်':t==='sale'?'အရောင်း':'ငွေလက်ခံ'}
-function badge(e){
-  if(e.type!=='sale')return '';
-  const c=+e.collected||0,a=+e.amount||0; const st=c>=a?'Paid':c>0?'Partial':'Outstanding';
-  return `<span class="badge ${st==='Paid'?'paid':st==='Partial'?'part':'out'}">${st}</span>`;
-}
-function renderHome(){
-  const s=summarize();const total=(k)=>s.reduce((a,x)=>a+(+x[k]||0),0);
-  const vals=[['Stock Out',total('stock')],['Sold',total('sold')],['Remaining',total('remaining')],['Sales',money(total('sales'))],['Collected',money(total('collected'))],['Outstanding',money(total('outstanding'))]];
-  document.getElementById('metrics').innerHTML=vals.map(v=>`<div class="card metric"><b>${v[1]}</b><span>${v[0]}</span></div>`).join('');
-  const r=[...entries].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,6);
-  document.getElementById('recent').innerHTML=r.length?r.map(e=>`<div style="padding:9px 0;border-bottom:1px solid var(--line)"><b>${e.date}</b> · ${typeLabel(e.type)} · Lot ${e.lot}<br><span class="note">${e.type==='collection'?money(e.collectionAmount):(e.qty||0)+' pcs'+(e.type==='sale'?' · '+money(e.amount):'')}</span></div>`).join(''):'<span class="note">No entries yet.</span>';
-}
-function renderSummary(){
-  const q=(document.getElementById('summarySearch').value||'').toLowerCase();
-  const s=summarize().filter(x=>x.lot.toLowerCase().includes(q)).sort((a,b)=>a.lot.localeCompare(b.lot,undefined,{numeric:true}));
-  document.getElementById('summaryBody').innerHTML=s.map(x=>`<tr><td><b>${x.lot}</b></td><td>${x.stock}</td><td>${x.sold}</td><td><b>${x.remaining}</b></td><td>${money(x.sales)}</td><td>${money(x.collected)}</td><td>${money(x.outstanding)}</td></tr>`).join('');
-}
-function renderHistory(){
-  const d=document.getElementById('fDate').value,l=(document.getElementById('fLot').value||'').toLowerCase(),t=document.getElementById('fType').value;
-  const arr=[...entries].filter(e=>(!d||e.date===d)&&(!l||e.lot.toLowerCase().includes(l))&&(!t||e.type===t)).sort((a,b)=>(b.date+b.createdAt).localeCompare(a.date+a.createdAt));
-  document.getElementById('historyBody').innerHTML=arr.map(e=>`<tr><td>${e.date}</td><td>${typeLabel(e.type)}</td><td><b>${e.lot}</b></td><td>${e.qty||'-'}</td><td>${e.type==='collection'?money(e.collectionAmount):(e.amount?money(e.amount):'-')}</td><td>${e.type==='sale'?money(e.collected):e.type==='collection'?money(e.collectionAmount):'-'}</td><td>${badge(e)}</td><td class="no-print"><button onclick="editEntry('${e.id}')">Edit</button> <button onclick="deleteEntry('${e.id}')">Delete</button></td></tr>`).join('');
-}
-function editEntry(id){
-  const e=entries.find(x=>x.id===id);if(!e)return;go('entry');document.getElementById('editId').value=e.id;document.getElementById('date').value=e.date;document.getElementById('type').value=e.type;document.getElementById('lot').value=e.lot;document.getElementById('note').value=e.note||'';toggleFields();
-  if(e.type!=='collection'){document.getElementById('qty').value=e.qty||'';document.getElementById('unitPrice').value=e.unitPrice||'';calcTotal()}
-  if(e.type==='sale'){document.getElementById('buyer').value=e.buyer||'';document.getElementById('status').value=e.status||'Paid';document.getElementById('collected').value=e.collected||0}
-  if(e.type==='collection'){document.getElementById('collectionAmount').value=e.collectionAmount||0;document.getElementById('collectionBuyer').value=e.buyer||''}
-  document.getElementById('cancelEdit').classList.remove('hidden');
-}
-function deleteEntry(id){if(confirm('ဒီစာရင်းကို Delete လုပ်မလား?')){entries=entries.filter(e=>e.id!==id);save();renderHistory();renderHome()}}
+function badge(e){if(e.type!=='sale')return '';const c=+e.collected||0,a=+e.amount||0;const st=c>=a?'Paid':c>0?'Partial':'Outstanding';return `<span class="badge ${st==='Paid'?'paid':st==='Partial'?'part':'out'}">${st}</span>`}
+function renderHome(){const s=summarize(),total=k=>s.reduce((a,x)=>a+(+x[k]||0),0);const vals=[['Stock Out',total('stock')],['Sold',total('sold')],['Remaining',total('remaining')],['Sales',money(total('sales'))],['Collected',money(total('collected'))],['Outstanding',money(total('outstanding'))]];document.getElementById('metrics').innerHTML=vals.map(v=>`<div class="card metric"><b>${v[1]}</b><span>${v[0]}</span></div>`).join('');const r=[...entries].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,6);document.getElementById('recent').innerHTML=r.length?r.map(e=>`<div style="padding:9px 0;border-bottom:1px solid var(--line)"><b>${e.date}</b> · ${typeLabel(e.type)} · Lot ${e.lot}<br><span class="note">${e.type==='collection'?money(e.collectionAmount):(e.qty||0)+' pcs'+(e.type==='sale'?' · '+money(e.amount):'')}</span></div>`).join(''):'<span class="note">No entries yet.</span>'}
+function renderSummary(){const q=(document.getElementById('summarySearch').value||'').toLowerCase();const s=summarize().filter(x=>x.lot.toLowerCase().includes(q)).sort((a,b)=>a.lot.localeCompare(b.lot,undefined,{numeric:true}));document.getElementById('summaryBody').innerHTML=s.map(x=>`<tr><td><b>${x.lot}</b></td><td>${x.stock}</td><td>${x.sold}</td><td><b>${x.remaining}</b></td><td>${money(x.sales)}</td><td>${money(x.collected)}</td><td>${money(x.outstanding)}</td></tr>`).join('')}
+function renderHistory(){const d=document.getElementById('fDate').value,l=(document.getElementById('fLot').value||'').toLowerCase(),t=document.getElementById('fType').value;const arr=[...entries].filter(e=>(!d||e.date===d)&&(!l||e.lot.toLowerCase().includes(l))&&(!t||e.type===t)).sort((a,b)=>(b.date+b.createdAt).localeCompare(a.date+a.createdAt));document.getElementById('historyBody').innerHTML=arr.map(e=>`<tr><td>${e.date}</td><td>${typeLabel(e.type)}</td><td><b>${e.lot}</b></td><td>${e.qty||'-'}</td><td>${e.type==='collection'?money(e.collectionAmount):(e.amount?money(e.amount):'-')}</td><td>${e.type==='sale'?money(e.collected):e.type==='collection'?money(e.collectionAmount):'-'}</td><td>${badge(e)}</td><td class="no-print"><button onclick="editEntry('${e.id}')">Edit</button> <button onclick="deleteEntry('${e.id}')">Delete</button></td></tr>`).join('')}
+function editEntry(id){const e=entries.find(x=>x.id===id);if(!e)return;go('entry');document.getElementById('editId').value=e.id;document.getElementById('date').value=e.date;document.getElementById('type').value=e.type;document.getElementById('lot').value=e.lot;document.getElementById('note').value=e.note||'';toggleFields();if(e.type!=='collection'){document.getElementById('qty').value=e.qty||'';document.getElementById('unitPrice').value=e.unitPrice||'';calcTotal()}if(e.type==='sale'){document.getElementById('buyer').value=e.buyer||'';document.getElementById('status').value=e.status||'Paid';document.getElementById('collected').value=e.collected||0}if(e.type==='collection'){document.getElementById('collectionAmount').value=e.collectionAmount||0;document.getElementById('collectionBuyer').value=e.buyer||''}document.getElementById('cancelEdit').classList.remove('hidden')}
+async function deleteEntry(id){if(!confirm('ဒီစာရင်းကို Delete လုပ်မလား?'))return;let error=null;const [kind,key]=id.split(':');if(kind==='stock')({error}=await sb.from('stock_movements').delete().eq('id',key));if(kind==='sale')({error}=await sb.from('sales').delete().eq('id',key));if(kind==='collection')({error}=await sb.from('collections').delete().eq('id',key));if(error){alert('Delete error: '+error.message);return}await loadCloud();renderHistory();renderHome()}
 function renderReports(){const s=summarize();document.getElementById('reportBody').innerHTML=s.map(x=>`<tr><td>${x.lot}</td><td>${x.stock}</td><td>${x.sold}</td><td>${x.remaining}</td><td>${money(x.sales)}</td><td>${money(x.collected)}</td><td>${money(x.outstanding)}</td></tr>`).join('')}
-function exportCSV(){
-  const rows=[['Date','Type','Lot','Qty','Unit Price','Amount','Collected','Collection Amount','Buyer','Status','Note'],...entries.map(e=>[e.date,e.type,e.lot,e.qty||'',e.unitPrice||'',e.amount||'',e.collected||'',e.collectionAmount||'',e.buyer||'',e.status||'',e.note||''])];
-  const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');download('ATK_Lot_Sales.csv','text/csv;charset=utf-8',csv);
-}
+function exportCSV(){const rows=[['Date','Type','Lot','Qty','Unit Price','Amount','Collected','Collection Amount','Buyer','Status','Note'],...entries.map(e=>[e.date,e.type,e.lot,e.qty||'',e.unitPrice||'',e.amount||'',e.collected||'',e.collectionAmount||'',e.buyer||'',e.status||'',e.note||''])];const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');download('ATK_Lot_Sales.csv','text/csv;charset=utf-8',csv)}
 function exportJSON(){download('ATK_Lot_Sales_Backup.json','application/json',JSON.stringify({settings,entries},null,2))}
-function restoreJSON(ev){
-  const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.entries))throw 0;entries=d.entries;settings=d.settings||settings;save();localStorage.setItem(SET_KEY,JSON.stringify(settings));applySettings();alert('Restore complete');go('home')}catch{alert('Backup file မမှန်ပါ')}};r.readAsText(f)
-}
+async function restoreJSON(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=async()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.entries))throw 0;localStorage.setItem('atk_import_pending',JSON.stringify(d.entries));settings=d.settings||settings;localStorage.setItem(SET_KEY,JSON.stringify(settings));applySettings();await importLocalBackup()}catch{alert('Backup file မမှန်ပါ')}};r.readAsText(f)}
 function download(name,type,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function loadSettings(){document.getElementById('bizName').value=settings.bizName||'ATK Lot Sales';document.getElementById('currency').value=settings.currency||'MMK'}
 function saveSettings(){settings={bizName:document.getElementById('bizName').value.trim()||'ATK Lot Sales',currency:document.getElementById('currency').value.trim()||'MMK'};localStorage.setItem(SET_KEY,JSON.stringify(settings));applySettings();alert('Saved')}
-function applySettings(){document.getElementById('bizTitle').textContent=settings.bizName||'ATK Lot Sales'}
-function clearAll(){if(confirm('စာရင်းအားလုံးကို အပြီးဖျက်မလား? Backup ရှိတာသေချာပါစေ။')){entries=[];save();renderHome()}}
+function applySettings(){document.getElementById('bizTitle').innerHTML=(settings.bizName||'ATK Lot Sales')+' <span class="cloud-pill">Cloud Sync</span>'}
+async function clearAll(){if(!confirm('Cloud စာရင်းအားလုံးကို အပြီးဖျက်မလား? Backup ရှိတာသေချာပါစေ။'))return;for(const t of ['collections','sales','stock_movements']){const {error}=await sb.from(t).delete().eq('user_id',currentUser.id);if(error){alert('Delete error: '+error.message);return}}await loadCloud()}
+
+async function login(){const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;setAuthStatus('Login ဝင်နေပါတယ်…');const {error}=await sb.auth.signInWithPassword({email,password});if(error)setAuthStatus(error.message,true)}
+async function signup(){const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;if(password.length<6){setAuthStatus('Password အနည်းဆုံး 6 လုံး ထည့်ပါ',true);return}setAuthStatus('Account ဖန်တီးနေပါတယ်…');const {data,error}=await sb.auth.signUp({email,password});if(error){setAuthStatus(error.message,true);return}if(!data.session)setAuthStatus('Account ဖန်တီးပြီးပါပြီ။ Email confirmation လိုနိုင်ပါတယ်။ Mail ကိုစစ်ပါ။');else setAuthStatus('Account ready')}
+async function logout(){await sb.auth.signOut()}
+function setAuthStatus(msg,bad=false){const e=document.getElementById('authStatus');e.textContent=msg;e.style.color=bad?'#b42318':'#6b7280'}
+async function handleSession(session){currentUser=session?.user||null;document.getElementById('authScreen').classList.toggle('hidden',!!currentUser);if(currentUser){setAuthStatus('Connected');await loadCloud();go('home')}else{entries=[];renderHome()}}
+sb.auth.onAuthStateChange((_event,session)=>setTimeout(()=>handleSession(session),0));
+
+async function importLocalBackup(){
+  if(!currentUser){alert('Login အရင်ဝင်ပါ');return}
+  let old=[];try{old=JSON.parse(localStorage.getItem('atk_import_pending')||localStorage.getItem(LS_KEY)||'[]')}catch{}
+  old=old.filter(e=>!String(e.id||'').includes(':'));if(!old.length){alert('Import လုပ်ရန် အဟောင်း Local Data မတွေ့ပါ');return}
+  if(!confirm(`${old.length} ခုကို Cloud ထဲ Import လုပ်မလား? တစ်ခါပဲလုပ်ပါ။`))return;
+  for(const e of old){
+    let error=null;
+    if(e.type==='stockout')({error}=await sb.from('stock_movements').insert({user_id:currentUser.id,movement_date:e.date||today(),movement_type:'ISSUE',lot_no:e.lot,qty:+e.qty||0,note:e.note||''}));
+    if(e.type==='sale')({error}=await sb.from('sales').insert({user_id:currentUser.id,sale_date:e.date||today(),lot_no:e.lot,price:+e.amount||((+e.qty||0)*(+e.unitPrice||0)),qty:+e.qty||1,commission_percent:0,note:packMeta({note:e.note||'',buyer:e.buyer||'',status:e.status||'Paid',collected:+e.collected||0,unitPrice:+e.unitPrice||0})}));
+    if(e.type==='collection')({error}=await sb.from('collections').insert({user_id:currentUser.id,collection_date:e.date||today(),amount:+e.collectionAmount||0,note:packMeta({lot:e.lot||'',buyer:e.buyer||'',note:e.note||''})}));
+    if(error){alert('Import error: '+error.message);return}
+  }
+  localStorage.removeItem('atk_import_pending');localStorage.setItem('atk_cloud_import_done','1');await loadCloud();alert('Old Local Data ကို Cloud ထဲ Import ပြီးပါပြီ')
+}
+
 applySettings();go('home');
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+
+async function startCloud(){
+  const statusBox=document.getElementById('authStatus');
+  try{
+    if(!window.supabase){
+      throw new Error('Supabase library မဖွင့်နိုင်ပါ');
+    }
+    const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error('Connection timeout')),8000));
+    const result=await Promise.race([sb.auth.getSession(),timeout]);
+    await handleSession(result.data?.session||null);
+    if(!result.data?.session){
+      setAuthStatus('Cloud ready — Email / Password ထည့်ပြီး Login ဝင်ပါ။');
+    }
+  }catch(err){
+    setAuthStatus('Cloud ချိတ်ဆက်မှု မပြီးပါ: '+(err?.message||err)+'။ Reload လုပ်ပြီး ပြန်စမ်းပါ။',true);
+  }
+}
+startCloud();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',async()=>{
+    try{
+      const regs=await navigator.serviceWorker.getRegistrations();
+      for(const r of regs) await r.update();
+      await navigator.serviceWorker.register('sw.js');
+    }catch(e){}
+  })
+}
 </script>
 </body></html>
