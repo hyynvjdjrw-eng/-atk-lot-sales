@@ -365,6 +365,32 @@ async function startCloud(){
 }
 startCloud();
 
+  // ATK Supabase Realtime Auto Sync
+let realtimeTimer = null;
+
+function startRealtimeSync(){
+  sb.channel('atk-live-sync')
+    .on('postgres_changes',
+      {event:'*', schema:'public', table:'stock_movements'},
+      realtimeChanged)
+    .on('postgres_changes',
+      {event:'*', schema:'public', table:'sales'},
+      realtimeChanged)
+    .on('postgres_changes',
+      {event:'*', schema:'public', table:'collections'},
+      realtimeChanged)
+    .subscribe();
+}
+
+function realtimeChanged(){
+  clearTimeout(realtimeTimer);
+  realtimeTimer = setTimeout(async()=>{
+    if(currentUser) await loadCloud();
+  },300);
+}
+
+startRealtimeSync();
+
 if('serviceWorker' in navigator){
   window.addEventListener('load',async()=>{
     try{
