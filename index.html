@@ -327,7 +327,20 @@ function setAuthStatus(msg,bad=false){
   e.textContent=msg;
   e.style.color=bad?'#b42318':'#6b7280';
 }
-async function handleSession(session){currentUser=session?.user||null;document.getElementById('authScreen').classList.toggle('hidden',!!currentUser);if(currentUser){setAuthStatus('Connected');await loadCloud();go('home')}else{entries=[];renderHome()}}
+async function handleSession(session){
+  currentUser=session?.user||null;
+  document.getElementById('authScreen').classList.toggle('hidden',!!currentUser);
+
+  if(currentUser){
+    setAuthStatus('Connected');
+    await loadCloud();
+    startRealtimeSync();
+    go('home');
+  }else{
+    entries=[];
+    renderHome();
+  }
+}
 sb.auth.onAuthStateChange((_event,session)=>setTimeout(()=>handleSession(session),0));
 
 async function importLocalBackup(){
@@ -389,7 +402,7 @@ function realtimeChanged(){
   },300);
 }
 
-startRealtimeSync();
+
 
 if('serviceWorker' in navigator){
   window.addEventListener('load',async()=>{
